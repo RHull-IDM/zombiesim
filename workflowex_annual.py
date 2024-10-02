@@ -103,7 +103,7 @@ def basic_zombie():
 
     # Run the sim and plot results
     sim.run()
-    sim.plot('zombie');
+    sim.results['zombie'].plot();
 
 
 scens = {
@@ -184,6 +184,33 @@ def run_zombies(scen, rand_seed, zombie_pars=None, death_pars=None, intvs=[], **
         df[key] = val
 
     return df
+
+def run_scens():
+    # Now run all the scenarios in parallel, repeating each configuration 10 times
+    n_repeats = 3
+
+    results = []
+    cfgs = []
+
+    for skey, scen in scens.items():
+        for rand_seed in range(n_repeats):
+            cfgs.append({'scen': skey, 'rand_seed': rand_seed} | scen)
+
+    print(f'Running {len(cfgs)} zombie simulations...')
+    T = sc.tic()
+    results += sc.parallelize(run_zombies, iterkwargs=cfgs)
+    print(f'Completed in {sc.toc(T, output=True):.1f}s')
+    df = pd.concat(results).replace(np.inf, np.nan)
+
+    # Manipulate the data and create a plot using the Seaborn library
+    dfm = df.melt(id_vars=['Scen', 'Year', 'rand_seed'],
+                  value_vars=['Humans', 'Zombies', 'Zombie Prevalence', 'Zombie-Cause Mortality'], var_name='Channel',
+                  value_name='Value')
+    g = sns.relplot(kind='line', data=dfm, col='Channel', x='Year', y='Value', hue='Scen', hue_order=scens.keys(),
+                    facet_kws=dict(sharey=False), col_wrap=2, height=4)
+    g.set(ylim=(0, None))
+    g.axes[2].yaxis.set_major_formatter(mtick.PercentFormatter(1));
+
 def run_calibs():
     people = ss.People(n_agents=5_000)  # 5000 people live in this town
 
@@ -220,25 +247,13 @@ def run_calibs():
     demog = [births, deaths]
 
     kill_int = KillZombies(year=2024, rate=0.1)  # no zombies are killed at the start
-    #vx_int = ss.campaign_vx(product=zombie_vaccine(), years=2024, prob=0.0)  # no vx happening now
 
-    intvs = [kill_int,
-             #vx_int
-             ]
+    intvs = [kill_int ]
 
     # And finally bring everything together in a sim
     sim_pars = dict(start=2024, stop=2040, dt=0.5, verbose=0)
     sim = ss.Sim(sim_pars, people=people, diseases=zombie, networks=networks, demographics=demog, interventions=intvs)
 
-    # Define the calibration parameters
-    # calib_pars = dict(
-    #     diseases = dict(
-    #         zombie = dict(
-    #             beta = [0.3, 0.01, 0.5],
-    #             p_fast = [0.1, 0.1, 0.5],
-    #         ),
-    #     ),
-    # )
     calib_pars = dict(
         zombie_beta = dict(guess=0.05, low=0.01, high=0.15, path=('diseases', 'zombie', 'beta')),
         zombie_p_fast = dict(guess=0.31, low=0.2, high=0.4, path=('diseases', 'zombie', 'p_fast')),
@@ -286,36 +301,8 @@ def run_calibs():
 
 
 
-def run_scens():
-    # Now run all the scenarios in parallel, repeating each configuration 10 times
-    n_repeats = 3
-
-    results = []
-    cfgs = []
-
-    for skey, scen in scens.items():
-        for rand_seed in range(n_repeats):
-            cfgs.append({'scen': skey, 'rand_seed': rand_seed} | scen)
-
-    print(f'Running {len(cfgs)} zombie simulations...')
-    T = sc.tic()
-    results += sc.parallelize(run_zombies, iterkwargs=cfgs)
-    print(f'Completed in {sc.toc(T, output=True):.1f}s')
-    df = pd.concat(results).replace(np.inf, np.nan)
-
-    # Display the first few reows of the results data frame
-    # display(df.head())
-
-    # Manipulate the data and create a plot using the Seaborn library
-    dfm = df.melt(id_vars=['Scen', 'Year', 'rand_seed'],
-                  value_vars=['Humans', 'Zombies', 'Zombie Prevalence', 'Zombie-Cause Mortality'], var_name='Channel',
-                  value_name='Value')
-    g = sns.relplot(kind='line', data=dfm, col='Channel', x='Year', y='Value', hue='Scen', hue_order=scens.keys(),
-                    facet_kws=dict(sharey=False), col_wrap=2, height=4)
-    g.set(ylim=(0, None))
-    g.axes[2].yaxis.set_major_formatter(mtick.PercentFormatter(1));
 
 if __name__ == '__main__':
-    #basic_zombie()
-    #run_scens()
+    basic_zombie()
+    run_scens()
     run_calibs()
